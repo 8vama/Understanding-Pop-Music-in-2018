@@ -1,0 +1,581 @@
+---
+title: "Understanding Pop Music in 2018"
+author: "Eva Ma"
+date: "11/8/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r import packages, include=FALSE}
+# 
+# install.packages("MASS")
+library(MASS)
+library(ggplot2)
+library(reshape2)
+
+library(car)
+library(glmnet)
+library(caret)
+library(tidyverse)
+```
+
+## Data Collection
+
+2260 unique songs was obtained from the playlists "Today's Top Hits", 'Pop Rising', 'Hot Rhythmic', 'Mega Hit Mix', 'New Music Friday', 'Hit Rewind', 'Teen Party', 'Guilty Pleasures', 'Women of Pop', 'Soft Pop Hits', 'African Heat', 'Acoustic Hits', 'Fresh & Chill', 'Bedroom Pop', 'Everyday Favorites', 'Global X', 'Contemporary Blend', 'Fangirls Run the World', 'Singled Out', 'Left of Center', 'Afropop', 'Pop Sauce', 'Mellow Pop', 'Wa-oh-wa-oh!', 'Out Now', 'Pop Royalty', 'Workday: Pop', 'Now Hear This', 'Certified Gold', 'Crowd Pleasers', 'LA Pops', 'LADY GAGA / JOANNE', 'Pop Matters', 'Retro Pop', "Tomorrow's Hits", 'All A Cappella', 'Yalla Araby', 'Persian Essentials', 'Radio 1 Playlist (BBC)', 'Wild Cards: Winter Mix', 'Arab X', 'Fresh Finds: Poptronix', 'The GRAMMYs Official Playlist', 'Pop Chile', "Today's Top Egyptian Hits", "Today's Top Maghreb Hits". 
+
+```{r read}
+
+mydata = read.csv("SpotifyPopSongsPopCategory.csv", header = TRUE)
+
+trainData = mydata[1:2000,]
+testData = mydata[2000:2259,]
+attach(trainData)
+
+trainData$key <- NULL
+trainData$duration_ms <- NULL
+trainData$id <- NULL
+trainData$uri <- NULL
+trainData$track_href <- NULL
+trainData$time_signature <- NULL
+
+head(trainData)
+
+trainData$name <- NULL
+
+
+
+```
+
+
+```{r visualize}
+popularity <- trainData$popularity
+
+sd(popularity)
+plot(popularity, xlab = "Popularity")
+pop =data.frame(trainData$popularity)
+ggplot(pop, aes(trainData$popularity))+ geom_bar()
+
+pop9 =data.frame(testData$popularity)
+ggplot(pop9, aes(testData$popularity))+ geom_bar()
+```
+
+
+The data set covers a range of popularities with a standard deviation of 20.64241. The data set is slightly more centered towards the right tail.
+
+The data set is split into a training set and a testings set.
+
+
+
+## Naive MLR Model
+
+To investigate what factors influence a song's popularity, we first run a naive MLR model, where the regressors are energy, valence, liveness, tempo, speechiness, instrumentalness, acousticness, loudness, and danceability.
+
+```{r naiveMLR}
+
+residualsHistogram <- function(summary){
+
+  res = summary$residuals
+  hist(res, breaks = 50)
+}
+
+prediction <- function(summary){
+  c = summary$coefficients[,1]
+  
+  yhat = c[2] * testData$energy + c[3] * testData$valence + c[4] * testData$liveness+ c[5]* testData$tempo +c[6]* testData$speechiness + c[7]* testData$instrumentalness + c[8]* testData$acousticness+
+    +c[9]* testData$loudness + c[10]* testData$danceability + c[1]
+  
+  y = testData$popularity
+  
+  res = yhat - y
+  
+  hist(res, breaks = 50)
+  
+}
+
+naive_mlr <- lm((popularity) ~ energy + valence + liveness + tempo + speechiness + instrumentalness + acousticness+ loudness +danceability )
+model_sum0 <- summary(naive_mlr)
+model_sum0
+
+par(mfrow = c(2, 2))
+# model checking
+residualsHistogram(naive_mlr)
+plot(naive_mlr)
+
+# test the model
+prediction(model_sum0)
+
+# Kolmogorov-Smirnov test
+ks.test(resid(naive_mlr)/sigma(naive_mlr), "pnorm")
+
+
+
+```
+
+
+The estimates indicate that there is a negative relationship between popularity and energy, valence, liveness, tempo, instrumentalness, acousticness. Most of the results make sense. For example, generally, people prefer to play music recorded in studios, so songs with low liveness are more popular. In 2018, popular music is increasingly electronic, so it makes sense that acousticness have a negative coefficient. Also, catchy music often have lyrics, which results in a low instrumentalness. 
+
+However, it is unclear why energy, valence, and tempo also have negative coefficients. It is assumed that generally pop music is energetic and happy.
+
+In terms of standard error of each estimates, it is very small and therefore desired. It follows that most estimates are highly significant, except for tempo, speechiness, and instrumentalness.
+
+The $R^2$ value is relatively small, which means that only a small portion of the variability in observations is explained by this model. 
+
+Our F statistics, however, is high significant. It shows that our model is highly significant.
+
+Next, we will focus on improving the $R^2$ value.
+
+
+
+```{r transformation of response}
+prediction1 <- function(summary){
+  c = summary$coefficients[,1]
+
+yhat = c[2] * testData$energy + c[3] * testData$valence + c[4] * testData$liveness+ c[5]* testData$tempo +c[6]* testData$speechiness + c[7]* testData$instrumentalness + c[8]* testData$acousticness+
+  +c[9]* testData$loudness + c[10]* testData$danceability + c[1]
+
+y = testData$popularity^1.3
+
+  res = yhat - y
+
+hist(res, breaks = 50)
+  
+}
+
+
+pop2 =data.frame(trainData$popularity^1.3)
+ggplot(pop2, aes((trainData$popularity^1.3)))+ geom_bar()
+
+trans_mlr <- lm((popularity ^1.3) ~ energy + valence + liveness + tempo + speechiness + instrumentalness + acousticness+ loudness +danceability )
+model_sum9 <- summary(trans_mlr)
+model_sum9
+
+# model checking
+residualsHistogram(model_sum9)
+plot(trans_mlr)
+
+# prediction
+prediction1(model_sum9)
+
+
+ks.test(resid(trans_mlr)/sigma(trans_mlr), "pnorm")
+```
+
+```{r Box-Cox transformation}
+
+# Box-Cox transformation
+bc <- boxcox(naive_mlr, optimize=TRUE)
+
+# (lambda <- bc$x[which.max(bc$y)])
+lambda <- 1.3
+
+
+pop3 =data.frame((trainData$popularity^lambda -1)/lambda )
+ggplot(pop3, aes((trainData$popularity^lambda -1)/lambda) )+ geom_bar()
+
+bc_trans_mlr <- lm((popularity ^lambda -1)/lambda ~ energy + valence + liveness + tempo + speechiness + instrumentalness + acousticness+ loudness +danceability )
+
+model_sum10 <- summary(bc_trans_mlr)
+model_sum10
+
+# model checking
+residualsHistogram(model_sum10)
+plot(bc_trans_mlr)
+
+# prediction <- function(summary){
+#   c = summary$coefficients[,1]
+# 
+# yhat = c[2] * testData$energy + c[3] * testData$valence + c[4] * testData$liveness+ c[5]* testData$tempo +c[6]* testData$speechiness + c[7]* testData$instrumentalness + c[8]* testData$acousticness+
+#   +c[9]* testData$loudness + c[10]* testData$danceability + c[1]
+# 
+# y = (testData$popularity^lambda -1 )/lambda
+# 
+#   # par(mfrow = c(1, 2))
+#   res = yhat - y
+# 
+# hist(res, breaks = 50)
+#   
+# }
+
+# prediction
+# prediction(model_sum10)
+
+
+ks.test(resid(bc_trans_mlr)/sigma(bc_trans_mlr), "pnorm")
+
+
+```
+
+## A Closer Look at the Dataset - Visualization 
+
+Let's first visualization the distribution of the regressor speechiness, tempo and instrumentalness.
+
+Below is a histogram for the distribution of speechiness, danceability, energy, liveness, valence, and instrumentalness.
+
+We can see that speechiness, instrumentalness, acousticness, and liveness are heavily centered around 0.
+```{r vis}
+x <- data.frame(speechiness, danceability, energy, liveness, valence, instrumentalness, acousticness)
+data<-melt(x)
+
+hist <- ggplot(data, aes(x=value, fill=variable)) + geom_histogram(alpha=0.5) + coord_cartesian(xlim=c(0,1), ylim=c(0, 1000)) 
+hist
+ggsave("ggplot_hist.png", plot=hist)
+
+ggplot(data.frame(tempo), aes(tempo))+ geom_freqpoly()
+ggplot(data.frame(loudness), aes(loudness))+ geom_freqpoly()
+
+
+```
+
+
+```{r vis2}
+
+pairs(popularity~ energy + valence + liveness + tempo + speechiness + instrumentalness + acousticness+ loudness + danceability ,data = mydata ,cex=0.01)
+
+
+```
+
+
+The pair plot comfirmed our observation that some regressor does not follow a normal distribution. Also, there little correlation between the regressors, except between energy and loudness.
+
+## Are the variables correlated?
+
+The correlation matrix and the VIF are attached below.
+
+```{r vif}
+X <- cbind(energy , valence , liveness, tempo , speechiness , instrumentalness , acousticness, loudness , danceability)
+c <- cor(X)
+round(c,8)
+
+
+vif(naive_mlr)
+```
+
+The variance inflation factors are small - most of them below 2 except for energy (       2.995352). It suggests that the model does not suffer from multicollinearity.
+
+
+
+## Log Transformation
+From the plots above, we can see a few regressors are not normally distributed like liveness and speechiness. A log transformation is applied to both variables.
+```{r log transformation}
+# log_mlr <- lm(mydata$popularity ~ mydata$energy + mydata$valence + log(mydata$liveness) + mydata$tempo + log(mydata$speechiness) + log(mydata$instrumentalness) + log(mydata$acousticness) + mydata$loudness + mydata$danceability )
+
+# modelChecking1 <- function(summary){
+#   par(mfrow = c(1, 2))
+#   res = summary$residuals
+# hist(res, breaks = 50)
+# 
+# s = res/summary$sigma 
+# 
+# qqnorm(s, main = "Normal QQ Plot of Standardized Residuals")
+# qqline(s, col = "blue")
+# abline(a = 0, b = 1, col = 'red')
+# 
+# 
+# c = summary$coefficients[,1]
+# 
+# yhat = c[2] * energy + c[3] * valence + c[4] * log(liveness) + c[5]* tempo +c[6]* log(speechiness) + c[7]* instrumentalness + c[8]* acousticness + c[9]* loudness + c[10]* danceability + c[1]
+# 
+# plot(yhat, s, main = "Residuals vs. yhat"); abline(h = 0, lwd = 2, col = "blue")
+# 
+# 
+# }
+
+prediction2 <- function(summary){
+  c = summary$coefficients[,1]
+
+  yhat = c[2] * testData$energy + c[3] * testData$valence + c[4] * log(testData$liveness) + c[5]* testData$tempo +c[6]* log(testData$speechiness) + c[7]* testData$instrumentalness + c[8]* testData$acousticness+
+    +c[9]* testData$loudness + c[10]* testData$danceability + c[1]
+  
+  y = (testData$popularity^1.3 - 1)/1.3
+# 
+#   par(mfrow = c(1, 2))
+  res = yhat - y
+
+  hist(res, breaks = 50)
+  
+}
+
+log_mlr <- lm((popularity^1.3 - 1)/1.3 ~ energy + valence + log(liveness) + tempo + log(speechiness) + instrumentalness + acousticness + loudness + danceability )
+model_sum4 <- summary(log_mlr)
+model_sum4
+
+
+plot(log_mlr)
+
+prediction2(model_sum4)
+
+```
+
+As we can see, $R^2$ improved  while maintaining a significant model.
+
+
+## Categorical Analysis
+Now we try to add a categorical variable, mode to see if $R^2$ can be further improved. Mode encodes major scale as 1 and minor as 0. As shown below, $R^2$ is increased 7.68% from the naive MLR.
+
+```{r Categorical}
+F <- mode
+table(F)
+
+
+# modelChecking2 <- function(summary){
+#   par(mfrow = c(1, 2))
+#   res = summary$residuals
+# hist(res, breaks = 50)
+# 
+# s = res/summary$sigma 
+# 
+# qqnorm(s, main = "Normal QQ Plot of Standardized Residuals")
+# qqline(s, col = "blue")
+# abline(a = 0, b = 1, col = 'red')
+# 
+# 
+# c = summary$coefficients[,1]
+# 
+# yhat = c[2] * energy + c[3] * valence + c[4] * log(liveness) + c[5]* tempo +c[6]* log(speechiness) + c[7]* instrumentalness + c[8]* acousticness + c[9]* loudness + c[10]* danceability + c[11]*mode + c[1]
+# 
+# plot(yhat, s, main = "Residuals vs. yhat"); abline(h = 0, lwd = 2, col = "blue")
+# 
+# 
+# }
+
+prediction3 <- function(summary){
+  c = summary$coefficients[,1]
+
+yhat = c[2] * testData$energy + c[3] * testData$valence + c[4] * log(testData$liveness) + c[5]* testData$tempo +c[6]* log(testData$speechiness) + c[7]* testData$instrumentalness + c[8]* testData$acousticness+
+  +c[9]* testData$loudness + c[10]* testData$danceability +c[11]*testData$mode + c[1]
+
+
+y = testData$popularity
+
+  res = yhat - y
+
+hist(res, breaks = 50)
+  
+}
+
+testData$popularity <- (testData$popularity^1.3-1)/1.3
+popularity <- (popularity^1.3-1)/1.3
+trainData$popularity <- (trainData$popularity^1.3-1)/1.3
+
+categorical_mlr <- lm(popularity ~ energy + valence + log(liveness) + tempo + log(speechiness) + instrumentalness + acousticness + loudness + danceability + mode  )
+
+model_sum1 <- summary(categorical_mlr)
+model_sum1
+# modelChecking2(model_sum1)
+
+
+residualsHistogram(categorical_mlr)
+plot(categorical_mlr)
+
+prediction3(model_sum1)
+```
+
+The difference between the popularity of a song resulting from changing from a minor scale to a major scale is 3.15.
+
+
+## Removing insignificant variables
+```{r modelReduction}
+
+n <- length(categorical_mlr$residuals)
+# backwards AIC
+backAIC <- step(categorical_mlr,direction="backward", data = trainData)
+# backwards BIC
+backBIC <- step(categorical_mlr,direction="backward", data = trainData, k=log(n))
+
+# forward AIC
+mint <- lm(popularity~1,data=trainData)
+forwardAIC <- step(mint,scope=list(lower=~1,
+upper=~energy + valence + log(liveness) + tempo + log(speechiness) + instrumentalness + acousticness + loudness + danceability + mode  ),
+direction="forward", data=trainData)
+
+# forward BIC
+forwardBIC <- step(mint,scope=list(lower=~1, 
+upper=~energy + valence + log(liveness) + tempo + log(speechiness) + instrumentalness + acousticness + loudness + danceability + mode ),
+direction="forward", data=trainData,k=log(n))
+
+
+final_mlr <- lm(popularity ~ energy + valence + log(liveness) + acousticness + loudness + danceability + mode  )
+
+model_sum8 <- summary(final_mlr)
+model_sum8
+
+plot(final_mlr)
+
+# modelChecking(model_sum2)
+```
+Backward AIC and BIC result: popularity ~ energy + valence + log(liveness) + acousticness + loudness + danceability + mode
+
+Forward AIC: popularity ~ energy + valence  + log(liveness)   + acousticness + loudness + danceability + mode
+
+Forward BIC : popularity ~ loudness + valence + danceability + mode + log(liveness) + 
+    energy + acousticness
+    
+
+
+## GLM
+```{r glm}
+glm.mod <- glm(popularity ~ energy + valence  + liveness + tempo + speechiness + instrumentalness + acousticness+ loudness + danceability + mode, family=gaussian(link="log"))
+
+model.sum5 <- summary(glm.mod)
+model.sum5
+
+plot(glm.mod)
+
+glm.mod1 <-glm(popularity ~ energy + valence + log(liveness) + tempo + log(speechiness) + instrumentalness + acousticness + loudness + danceability + mode , family=gaussian(link="log") )
+model.sum6 <- summary(glm.mod1)
+model.sum6
+
+plot(glm.mod1)
+```
+
+
+## Ridge, LASSO, and Elastic Net Models
+```{r glmnet}
+
+# 
+# testData$popularity <- (testData$popularity^1.3-1)/1.3
+# popularity <- (popularity^1.3-1)/1.3
+# trainData$popularity <- (trainData$popularity^1.3-1)/1.3
+# 
+# popularity
+
+# Data = considering that we have a data frame named dataF, with its first column being the class
+X <- as.matrix(cbind(energy , valence , log(liveness), acousticness, loudness , danceability)) # Removes class
+y <- as.double(as.matrix(popularity)) # Only class
+
+dataXY <- as.matrix(cbind(energy , valence , log(liveness),  acousticness, loudness , danceability, popularity))
+
+testDataXY <- as.matrix(cbind(testData$energy , testData$valence , log(testData$liveness),  testData$acousticness, testData$loudness , testData$danceability, testData$popularity))
+
+#Ridge Regression
+fit.ridge <- glmnet(X, y, family="gaussian", alpha=0)
+
+#LASSO
+fit.lasso <- glmnet(X, y, family="gaussian", alpha=1)
+
+#Elastic Net
+fit.elnet <- glmnet(X, y, family="gaussian", alpha=.5)
+
+
+#Find optimal value of tuning parameter - uses cross validation 
+cv_lambda<-cv.glmnet(X, y, alpha=0)
+cv_lambda$lambda.min
+plot(cv_lambda)
+coef(cv_lambda)
+
+
+#Find the optimal lambda tuning parameter
+for (i in 0:10) {
+    assign(paste0("fit", i), cv.glmnet(X, y, type.measure="mse", 
+                                              alpha=i/10,family="gaussian"))
+}
+
+par(mfrow=c(3,2))
+
+# For plotting options, type '?plot.glmnet' in R console
+plot(fit.lasso, xvar="lambda")
+plot(fit10, main="LASSO")
+
+plot(fit.ridge, xvar="lambda")
+plot(fit0, main="Ridge")
+
+plot(fit.elnet, xvar="lambda")
+plot(fit5, main="Elastic Net")
+
+lambda <- 10^seq(-3, 3, length = 100)
+
+
+trainData$tempo <- NULL
+trainData$speechiness <- NULL
+trainData$instrumentalness <- NULL
+
+testData$tempo <- NULL
+testData$speechiness <- NULL
+testData$instrumentalness <- NULL
+
+
+ridge <- train(
+    popularity ~., data = trainData, method = "glmnet",
+    trControl = trainControl("cv", number = 10),
+    tuneGrid = expand.grid(alpha = 0, lambda = lambda)
+)
+
+# Model coefficients
+coef(ridge$finalModel, ridge$bestTune$lambda)
+
+# Make predictions
+predictions <- ridge %>% predict(testData)
+
+
+# Model prediction performance
+data.frame(
+    RMSE = RMSE(predictions, testData$popularity),
+    Rsquare = R2(predictions, testData$popularity)
+)
+
+
+lasso <- train(
+    popularity ~., data =trainData, method = "glmnet",
+    trControl = trainControl("cv", number = 10),
+    tuneGrid = expand.grid(alpha = 1, lambda = lambda)
+)
+
+# Model coefficients
+coef(lasso$finalModel, lasso$bestTune$lambda)
+
+# Make predictions
+predictions <- lasso %>% predict(testData)
+
+# Model prediction performance
+data.frame(
+    RMSE = RMSE(predictions, testData$popularity),
+    Rsquare = R2(predictions, testData$popularity)
+)
+
+# Build the model
+elastic <- train(
+    popularity ~., data = trainData, method = "glmnet",
+    trControl = trainControl("cv", number = 10),
+    tuneLength = 10
+)
+
+# Model coefficients
+coef(elastic$finalModel, elastic$bestTune$lambda)
+
+# Make predictions
+predictions <- elastic %>% predict(testData)
+
+# Model prediction performance
+data.frame(
+    RMSE = RMSE(predictions, testData$popularity),
+    Rsquare = R2(predictions, testData$popularity)
+)
+
+models <- list(ridge = ridge, lasso = lasso, elastic = elastic)
+resamples(models) %>% summary( metric = "RMSE")
+
+
+
+
+
+```
+
+The ridge regression yields the most optimum RMSE with the coefficients:
+                             
+(Intercept)       70.587562856 \\
+liveness          -8.166892612 \\
+tempo             -0.001324982 \\
+energy           -15.921887134 \\
+speechiness        3.058979282 \\
+mode               3.114763830 \\
+instrumentalness  -1.940615809 \\
+acousticness      -8.374153049 \\
+loudness           1.745995798 \\
+valence          -16.069317150 \\
+danceability      21.587672148 \\
+
+
